@@ -1,0 +1,6 @@
+{
+  "appId": "com.dagbok.app",
+  "appName": "Dagboksapp",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
