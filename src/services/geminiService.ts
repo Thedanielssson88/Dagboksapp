@@ -1,6 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { CreateMLCEngine } from "@mlc-ai/web-llm";
-import { Capacitor } from '@capacitor/core';
+import { initLlama } from 'llama-cpp-capacitor';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
 import { db, getEntry, getEntryAudio, getDay, getEntriesForDay, updateEntry, updateDay } from "./db";
 
@@ -16,55 +15,42 @@ Fråga till exempel hur jag kände kring en specifik händelse, be mig utveckla 
 Syftet är att få mig att fördjupa mina tankar och göra dagboken mer personlig och värdefull.`;
 
 // ------------------------------------------------------------------
-// LOKAL AI-MOTOR (WebLLM via Pixel WebGPU och extern modellfil)
+// LOKAL AI-MOTOR (Native via llama-cpp-capacitor)
 // ------------------------------------------------------------------
-let localEngine: any = null;
-let isEngineLoading = false;
+let llamaContext: any = null;
+let isModelLoaded = false;
 
-// Funktion för att förladda motorn globalt (t.ex. vid app-start)
 export const initLocalEngine = async (onProgress?: (percent: number, text: string) => void) => {
-  if (localEngine || isEngineLoading) return;
+  // Om motorn redan är igång, ladda inte om den
+  if (isModelLoaded && llamaContext) return;
   
   const savedPath = localStorage.getItem('LOCAL_MODEL_PATH');
   if (!savedPath) {
-    console.warn("Lokal AI: Ingen modell-sökväg angiven i inställningar.");
+    console.warn("Lokal AI: Ingen modell-sökväg angiven.");
     return;
   }
 
-  isEngineLoading = true;
   try {
-    // 1. Säkerställ att sökvägen från filväljaren är formaterad som en file-URI
-    let fileUri = savedPath;
-    if (!fileUri.startsWith('file://') && !fileUri.startsWith('content://')) {
-      fileUri = 'file://' + fileUri;
-    }
+    onProgress?.(10, "Laddar in Llama-3 i Pixelns processor...");
+    
+    // Rensa bort eventuella "file://" prefix som filväljaren kan ha lagt till
+    const cleanPath = savedPath.replace('file://', '').replace('content://', '');
 
-    // 2. Skapa en säker URL som WebView kan strömma från
-    const modelUrl = Capacitor.convertFileSrc(fileUri);
-    console.log("Laddar modell från URL:", modelUrl);
+    // Initiera C++ motorn direkt med din 5GB fil
+    llamaContext = await initLlama({
+      model: cleanPath,
+      n_ctx: 2048,          // Hur mycket kontext (text) den kan minnas samtidigt
+      n_threads: 4,         // Använder 4 processorkärnor
+      n_gpu_layers: 99      // Siffra > 0 tvingar Android att använda GPU/Vulkan för maximal hastighet
+    });
 
-    // 3. Initiera motorn
-    // @ts-ignore
-    localEngine = await CreateMLCEngine(
-      "local-custom",
-      {
-        initProgressCallback: (p: any) => {
-          if (onProgress) onProgress(Math.round(p.progress * 100), p.text);
-        },
-        // @ts-ignore
-        model_list: [
-          {
-            model: modelUrl,
-            model_id: "local-custom",
-            model_lib: "https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/main/Llama-3-8B-Instruct-q4f32_1-MLC/Llama-3-8B-Instruct-q4f32_1-android.so"
-          }
-        ]
-      }
-    );
+    isModelLoaded = true;
+    onProgress?.(100, "Modell redo!");
+    console.log("Llama-3 laddades framgångsrikt via Native C++!");
+
   } catch (err: any) {
-    console.error("Lokal AI: Kunde inte förladda modellen.", err);
-  } finally {
-    isEngineLoading = false;
+    console.error("Lokal AI: Kunde inte ladda modellen via Llama.cpp.", err);
+    throw new Error("Kunde inte starta AI-motorn. Kontrollera att filen är en giltig GGUF.");
   }
 };
 
@@ -74,30 +60,34 @@ const runLocalLlama = async (
   onProgress?: (p: number, msg: string) => void
 ): Promise<string> => {
   
-  if (isEngineLoading) {
-    throw new Error("AI-motorn laddas fortfarande in i minnet. Vänta några sekunder.");
-  }
-
-  if (!localEngine) {
-    onProgress?.(0, "Initierar AI-motor...");
+  // Säkerställ att filen är inläst i processorn innan vi ställer en fråga
+  if (!isModelLoaded || !llamaContext) {
+    onProgress?.(0, "Initierar Native AI-motor...");
     await initLocalEngine((percent, text) => onProgress?.(percent, text));
-    if (!localEngine) throw new Error("Kunde inte starta lokal AI-motor. Kontrollera filsökvägen.");
   }
 
-  onProgress?.(90, "AI tänker... (Genererar text)");
+  onProgress?.(90, "AI tänker... (Genererar text på enheten)");
 
-  const messages = [
-    { role: "system", content: systemInstruction },
-    { role: "user", content: prompt }
-  ];
+  try {
+    // Formatera prompten exakt så som Llama-3-modeller förväntar sig (ChatML-format)
+    const formattedPrompt = `<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n${systemInstruction}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n${prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`;
 
-  const reply = await localEngine.chat.completions.create({
-    messages,
-    temperature: 0.3,
-  });
+    // Kör igång tänkandet i C++ pluginet
+    const result = await llamaContext.completion({
+      prompt: formattedPrompt,
+      n_predict: 1000, // Max antal ord den får generera
+      temperature: 0.3,
+    });
 
-  let textResult = reply.choices[0].message.content || "";
-  return textResult.replace(/```json/g, '').replace(/```/g, '').trim();
+    let textResult = result.text || "";
+    
+    // Rensa bort markdown
+    return textResult.replace(/```json/g, '').replace(/```/g, '').trim();
+
+  } catch (err: any) {
+    console.error("Fel vid generering:", err);
+    throw new Error("AI:n kraschade under textgenereringen.");
+  }
 };
 
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -208,7 +198,54 @@ export const summarizeDayAI = async (dayId: string, onProgress?: (p: number, msg
 
   let responseData;
 
-  if (mode === 'local') {
+  if (mode === 'nano') {
+    onProgress?.(30, 'Startar Gemini Nano...');
+    
+    // @ts-ignore - window.ai är ett nytt experimentellt API
+    if (!window.ai || !window.ai.languageModel) {
+      throw new Error("Gemini Nano är inte tillgängligt i webbvyn än. Har du aktiverat flaggorna?");
+    }
+
+    const systemPrompt = `${customPrompt}\n\nVIKTIGT: Du MÅSTE svara med ett giltigt JSON-objekt exakt enligt detta schema:
+    {
+      "summary": "Din sammanfattning här",
+      "mood": "En passande emoji",
+      "learnings": ["Lärdom 1", "Lärdom 2"],
+      "peopleMentioned": ["Namn 1"],
+      "tagsMentioned": ["Tagg 1"]
+    }`;
+
+    try {
+      // @ts-ignore
+      const capabilities = await window.ai.languageModel.capabilities();
+      if (capabilities.available === 'no') {
+        throw new Error("Gemini Nano-modellen finns inte på denna enhet.");
+      }
+
+      onProgress?.(60, 'Nano tänker (Körs på enheten)...');
+      
+      // @ts-ignore - Skapa en session med systeminstruktionen
+      const session = await window.ai.languageModel.create({
+        systemPrompt: systemPrompt,
+        temperature: 0.3
+      });
+
+      const result = await session.prompt(userData);
+      session.destroy(); // Frigör minnet när vi är klara
+
+      // Rensa och parsa resultatet
+      const cleanResult = result.replace(/```json/g, '').replace(/```/g, '').trim();
+      const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Nano returnerade inte giltig JSON.");
+      
+      responseData = JSON.parse(jsonMatch[0]);
+
+    } catch (err: any) {
+      console.error("Nano Fel:", err);
+      throw new Error("Nano kraschade: " + err.message);
+    }
+
+  } else if (mode === 'local') {
     const systemPrompt = `${customPrompt}\n\nVIKTIGT: Du MÅSTE svara med ett giltigt JSON-objekt exakt enligt detta schema:
     {
       "summary": "Din sammanfattning här",

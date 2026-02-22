@@ -22,3 +22,6 @@ project(':capawesome-capacitor-file-picker').projectDir = new File('../node_modu
 
 include ':capgo-capacitor-audio-recorder'
 project(':capgo-capacitor-audio-recorder').projectDir = new File('../node_modules/@capgo/capacitor-audio-recorder/android')
+
+include ':llama-cpp-capacitor'
+project(':llama-cpp-capacitor').projectDir = new File('../node_modules/llama-cpp-capacitor/android')

@@ -16,6 +16,7 @@ dependencies {
     implementation project(':capawesome-capacitor-background-task')
     implementation project(':capawesome-capacitor-file-picker')
     implementation project(':capgo-capacitor-audio-recorder')
+    implementation project(':llama-cpp-capacitor')
 
 }
 

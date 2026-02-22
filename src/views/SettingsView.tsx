@@ -110,9 +110,10 @@ export const SettingsView = () => {
 
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">
             <span className="text-sm font-medium text-gray-700">Sammanfattning</span>
-            <div className="flex bg-gray-200 rounded-lg p-1 w-32">
+            <div className="flex bg-gray-200 rounded-lg p-1 w-48">
               <button onClick={() => setSummaryMode('api')} className={clsx("flex-1 text-[10px] font-bold py-1 rounded-md transition-all", summaryMode === 'api' ? "bg-white shadow-sm text-indigo-600" : "text-gray-500")}>API</button>
               <button onClick={() => setSummaryMode('local')} className={clsx("flex-1 text-[10px] font-bold py-1 rounded-md transition-all", summaryMode === 'local' ? "bg-white shadow-sm text-indigo-600" : "text-gray-500")}>LOKAL</button>
+              <button onClick={() => setSummaryMode('nano')} className={clsx("flex-1 text-[10px] font-bold py-1 rounded-md transition-all", summaryMode === 'nano' ? "bg-white shadow-sm text-indigo-600" : "text-gray-500")}>NANO</button>
             </div>
           </div>
           { (transcriptionMode === 'local' || summaryMode === 'local') && (
