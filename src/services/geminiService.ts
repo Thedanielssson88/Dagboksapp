@@ -1,6 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { initLlama } from 'llama-cpp-capacitor';
+import { registerPlugin } from '@capacitor/core';
 import { SpeechRecognition } from '@capacitor-community/speech-recognition';
+
+// Definiera din nya Nano-bro
+interface GeminiNanoPlugin {
+  generateText(options: { systemPrompt: string, prompt: string }): Promise<{ text: string }>;
+}
+const GeminiNano = registerPlugin<GeminiNanoPlugin>('GeminiNano');
 import { db, getEntry, getEntryAudio, getDay, getEntriesForDay, updateEntry, updateDay } from "./db";
 
 // Standard-prompts för dagbok och frågor
@@ -199,50 +206,18 @@ export const summarizeDayAI = async (dayId: string, onProgress?: (p: number, msg
   let responseData;
 
   if (mode === 'nano') {
-    onProgress?.(30, 'Startar Gemini Nano...');
-    
-    // @ts-ignore - window.ai är ett nytt experimentellt API
-    if (!window.ai || !window.ai.languageModel) {
-      throw new Error("Gemini Nano är inte tillgängligt i webbvyn än. Har du aktiverat flaggorna?");
-    }
-
-    const systemPrompt = `${customPrompt}\n\nVIKTIGT: Du MÅSTE svara med ett giltigt JSON-objekt exakt enligt detta schema:
-    {
-      "summary": "Din sammanfattning här",
-      "mood": "En passande emoji",
-      "learnings": ["Lärdom 1", "Lärdom 2"],
-      "peopleMentioned": ["Namn 1"],
-      "tagsMentioned": ["Tagg 1"]
-    }`;
-
+    onProgress?.(20, 'Anropar Native Gemini Nano...');
     try {
-      // @ts-ignore
-      const capabilities = await window.ai.languageModel.capabilities();
-      if (capabilities.available === 'no') {
-        throw new Error("Gemini Nano-modellen finns inte på denna enhet.");
-      }
-
-      onProgress?.(60, 'Nano tänker (Körs på enheten)...');
-      
-      // @ts-ignore - Skapa en session med systeminstruktionen
-      const session = await window.ai.languageModel.create({
-        systemPrompt: systemPrompt,
-        temperature: 0.3
+      // Detta anropar koden i din GeminiNanoPlugin.java
+      const result = await GeminiNano.generateText({
+        systemPrompt: customPrompt,
+        prompt: userData
       });
-
-      const result = await session.prompt(userData);
-      session.destroy(); // Frigör minnet när vi är klara
-
-      // Rensa och parsa resultatet
-      const cleanResult = result.replace(/```json/g, '').replace(/```/g, '').trim();
-      const jsonMatch = cleanResult.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("Nano returnerade inte giltig JSON.");
       
-      responseData = JSON.parse(jsonMatch[0]);
-
+      // Din Java-kod skickar just nu tillbaka en mockad JSON
+      responseData = JSON.parse(result.text); 
     } catch (err: any) {
-      console.error("Nano Fel:", err);
-      throw new Error("Nano kraschade: " + err.message);
+      throw new Error("Nano-plugin misslyckades: " + err.message);
     }
 
   } else if (mode === 'local') {
