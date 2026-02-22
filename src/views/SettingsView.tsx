@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Key, RotateCcw, PenTool, MessageSquare, Cpu, FolderOpen } from 'lucide-react';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
+import { registerPlugin } from '@capacitor/core';
 import { DEFAULT_DIARY_PROMPT, DEFAULT_QUESTIONS_PROMPT } from '../services/geminiService';
+
+const GeminiNano = registerPlugin<any>('GeminiNano');
 import { clsx } from 'clsx';
 
 export const SettingsView = () => {
@@ -136,18 +139,18 @@ export const SettingsView = () => {
                  <button 
                    onClick={async () => {
                      try {
-                       const result = await FilePicker.pickFiles({
-                         types: ['*/*'], 
-                       });
+                       const result = await FilePicker.pickFiles({ types: ['*/*'] });
                        const file = result.files[0];
-                       if (file && file.path) {
-                         setLocalModelPath(file.path);
-                         alert(`Modell vald:\n${file.name}`);
-                       } else {
-                         alert("Kunde inte hämta sökvägen till filen. Försök flytta den till din vanliga Download-mapp.");
+                       if (file) {
+                         // Vi skickar den krångliga URI:n till Java för att få den RIKTIGA sökvägen
+                         const uriToFix = (file as any).path || (file as any).uri || '';
+                         const { path } = await GeminiNano.getRealPath({ uri: uriToFix });
+                         
+                         setLocalModelPath(path);
+                         alert(`Modell vald! Sökvägen är nu: \n${path}`);
                        }
                      } catch (error) {
-                       console.log("Användaren avbröt eller ett fel uppstod:", error);
+                       console.log("Fel vid filval:", error);
                      }
                    }}
                    className="bg-indigo-600 text-white px-4 py-2 rounded-xl shadow-sm hover:bg-indigo-700 w-full text-sm font-bold flex items-center justify-center gap-2"
